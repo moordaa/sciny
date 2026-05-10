@@ -14,7 +14,7 @@ except KeyError:
 
 supabase: Client = create_client(URL, KEY)
 
-st.set_page_config(page_title="Ściny Web v1.7", page_icon="🪵", layout="centered")
+st.set_page_config(page_title="Ściny Web v1.7.1", page_icon="🪵", layout="centered")
 
 if 'zalogowany' not in st.session_state:
     st.session_state.zalogowany = False
@@ -52,7 +52,6 @@ else:
             st.session_state.zalogowany = False
             st.rerun()
 
-    # Naprawiony błąd pobierania pracowników 
     def get_pracownicy_list():
         try:
             res = supabase.table("pracownicy").select("*").order("nazwa").execute()
@@ -66,9 +65,8 @@ else:
         pracownicy = get_pracownicy_list()
         
         if not pracownicy:
-            st.warning("⚠️ Brak pracowników w bazie! Dodaj ich w zakładce 'Pracownicy' lub sprawdź połączenie.")
+            st.info("💡 Baza pracowników jest pusta. Przejdź do zakładki '👥 Pracownicy' i dodaj pierwszą osobę, aby móc rejestrować wydania.")
         else:
-            # Bezpieczne tworzenie listy nazw 
             lista_nazw = [p['nazwa'] for p in pracownicy if isinstance(p, dict) and 'nazwa' in p]
             
             with st.form("form_wydania", clear_on_submit=True):
@@ -81,7 +79,6 @@ else:
                 dat = st.date_input("📅 Data", datetime.today())
                 
                 if st.form_submit_button("ZAPISZ WYDANIE", type="primary", use_container_width=True):
-                    # Bezpieczne pobieranie ID 
                     try:
                         p_id = next(p['id'] for p in pracownicy if p['nazwa'] == kto)
                         supabase.table("wydania_scin").insert({
@@ -110,16 +107,17 @@ else:
         st.divider()
         pracownicy = get_pracownicy_list()
         for p in pracownicy:
-            c1, c2 = st.columns([4, 1])
-            c1.write(f"👷 **{p['nazwa']}**")
-            if c2.button("Usuń", key=f"p_{p['id']}"):
-                try:
-                    supabase.table("pracownicy").delete().eq("id", p['id']).execute()
-                    st.rerun()
-                except:
-                    st.error("Nie można usunąć pracownika (ma przypisane wydania).")
+            if isinstance(p, dict) and 'nazwa' in p:
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"👷 **{p['nazwa']}**")
+                if c2.button("Usuń", key=f"p_{p['id']}"):
+                    try:
+                        supabase.table("pracownicy").delete().eq("id", p['id']).execute()
+                        st.rerun()
+                    except:
+                        st.error("Nie można usunąć (pracownik ma zapisane wydania).")
 
-    # --- POZOSTAŁE ZAKŁADKI ---
+    # --- POZOSTAŁE FUNKCJE (BEZ ZMIAN) ---
     elif menu == "🔎 Wyszukiwarka":
         st.title("🔎 Wyszukiwarka")
         res = supabase.table("wydania_scin").select("*, pracownicy(nazwa)").order("data", desc=True).execute()
@@ -127,6 +125,7 @@ else:
             df = pd.DataFrame(res.data)
             df['Pracownik'] = df['pracownicy'].apply(lambda x: x['nazwa'] if x else "Nieznany")
             st.dataframe(df[['data', 'Pracownik', 'dlugosc', 'obstawki', 'm3', 'adnotacja']], use_container_width=True)
+        else: st.info("Brak danych do wyświetlenia.")
 
     elif menu == "📈 Statystyki":
         st.title("📈 Statystyki")
