@@ -36,14 +36,17 @@ if not st.session_state.zalogowany:
                 if res.data:
                     st.session_state.zalogowany, st.session_state.uzytkownik, st.session_state.rola = True, l, res.data[0].get('rola') or "użytkownik"
                     st.rerun()
-                else: st.error("Błędne dane!")
-            except Exception as e: st.error(f"Problem z bazą: {e}")
+                else: 
+                    st.error("Błędne dane!")
+            except Exception as e: 
+                st.error(f"Problem z bazą: {e}")
 else:
     # --- MENU ---
     with st.sidebar:
         st.success(f"Zalogowano: **{st.session_state.uzytkownik}**")
         zakladki_menu = ["🪵 Wydania Ścinek", "🔎 Wyszukiwarka", "📈 Statystyki", "👥 Pracownicy", "📊 Eksport Excel", "💬 Czat"]
-        if st.session_state.rola == "admin": zakladki_menu.append("🔐 Konta Web")
+        if st.session_state.rola == "admin": 
+            zakladki_menu.append("🔐 Konta Web")
         menu = st.radio("MENU", zakladki_menu)
         if st.button("🚪 Wyloguj", use_container_width=True):
             st.session_state.zalogowany = False
@@ -76,7 +79,8 @@ else:
                         "obstawki": obs, "m3": m3, "adnotacja": adn,
                         "dodane_przez": st.session_state.uzytkownik
                     }).execute()
-                    st.toast("Zapisano!"); st.rerun()
+                    st.toast("Zapisano!")
+                    st.rerun()
 
     # --- ZAKŁADKA PRACOWNICY ---
     elif menu == "👥 Pracownicy":
@@ -90,7 +94,8 @@ else:
                     st.rerun()
                 except Exception as e:
                     st.error(f"BŁĄD PODCZAS DODAWANIA: {e}")
-            else: st.warning("Wpisz coś!")
+            else: 
+                st.warning("Wpisz coś!")
 
         st.divider()
         pracownicy = get_pracownicy_list()
