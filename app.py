@@ -33,8 +33,11 @@ if not st.session_state.zalogowany:
         else:
             try:
                 res = supabase.table("konta_web").select("*").eq("login", l).eq("haslo", p).execute()
-                if res.data:
-                    st.session_state.zalogowany, st.session_state.uzytkownik, st.session_state.rola = True, l, res.data[0].get('rola') or "użytkownik"
+                if hasattr(res, 'data') and res.data:
+                    dane = res.data[0] if isinstance(res.data, list) else res.data
+                    st.session_state.zalogowany = True
+                    st.session_state.uzytkownik = l
+                    st.session_state.rola = dane.get('rola', "użytkownik") if isinstance(dane, dict) else "użytkownik"
                     st.rerun()
                 else: 
                     st.error("Błędne dane!")
@@ -53,17 +56,32 @@ else:
             st.rerun()
 
     def get_pracownicy_list():
-        res = supabase.table("pracownicy").select("*").order("nazwa").execute()
-        return res.data if res.data else []
+        try:
+            res = supabase.table("pracownicy").select("*").order("nazwa").execute()
+            if hasattr(res, 'data'):
+                # Upewniamy się, że zawsze zwracamy listę
+                if isinstance(res.data, list):
+                    return res.data
+                elif isinstance(res.data, dict):
+                    return [res.data]
+            return []
+        except Exception as e:
+            st.error(f"Błąd pobierania danych z bazy: {e}")
+            return []
 
     # --- ZAKŁADKA WYDANIA ---
     if menu == "🪵 Wydania Ścinek":
         st.title("Nowe wydanie ścinek")
         pracownicy = get_pracownicy_list()
-        if not pracownicy:
+        
+        # Filtrujemy tylko te elementy, które faktycznie są słownikami, aby uniknąć TypeError
+        pracownicy_dict = [p for p in pracownicy if isinstance(p, dict)]
+
+        if not pracownicy_dict:
             st.warning("⚠️ Brak pracowników w bazie! Dodaj ich w zakładce 'Pracownicy'.")
         else:
-            lista_nazw = [p['nazwa'] for p in pracownicy]
+            lista_nazw = [p.get('nazwa', 'Nieznany') for p in pracownicy_dict]
+            
             with st.form("form_wydania", clear_on_submit=True):
                 kto = st.selectbox("👷 Pracownik", lista_nazw)
                 c1, c2, c3 = st.columns(3)
@@ -72,15 +90,24 @@ else:
                 m3 = c3.number_input("M3", min_value=0.0)
                 adn = st.text_input("📝 Adnotacja")
                 dat = st.date_input("📅 Data", datetime.today())
+                
                 if st.form_submit_button("ZAPISZ WYDANIE", type="primary", use_container_width=True):
-                    p_id = next(p['id'] for p in pracownicy if p['nazwa'] == kto)
-                    supabase.table("wydania_scin").insert({
-                        "pracownik_id": p_id, "data": str(dat), "dlugosc": dlu,
-                        "obstawki": obs, "m3": m3, "adnotacja": adn,
-                        "dodane_przez": st.session_state.uzytkownik
-                    }).execute()
-                    st.toast("Zapisano!")
-                    st.rerun()
+                    # Bezpieczne szukanie ID pracownika
+                    p_id = next((p.get('id') for p in pracownicy_dict if p.get('nazwa') == kto), None)
+                    
+                    if p_id is not None:
+                        try:
+                            supabase.table("wydania_scin").insert({
+                                "pracownik_id": p_id, "data": str(dat), "dlugosc": dlu,
+                                "obstawki": obs, "m3": m3, "adnotacja": adn,
+                                "dodane_przez": st.session_state.uzytkownik
+                            }).execute()
+                            st.toast("Zapisano!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Błąd zapisu: {e}")
+                    else:
+                        st.error("Nie znaleziono odpowiedniego ID pracownika!")
 
     # --- ZAKŁADKA PRACOWNICY ---
     elif menu == "👥 Pracownicy":
@@ -89,7 +116,7 @@ else:
         if st.button("DODAJ PRACOWNIKA", type="primary"):
             if nowy:
                 try:
-                    res = supabase.table("pracownicy").insert({"nazwa": nowy}).execute()
+                    supabase.table("pracownicy").insert({"nazwa": nowy}).execute()
                     st.success(f"Dodano: {nowy}")
                     st.rerun()
                 except Exception as e:
@@ -100,35 +127,46 @@ else:
         st.divider()
         pracownicy = get_pracownicy_list()
         for p in pracownicy:
-            c1, c2 = st.columns([4, 1])
-            c1.write(f"👷 **{p['nazwa']}**")
-            if c2.button("Usuń", key=f"p_{p['id']}"):
-                supabase.table("pracownicy").delete().eq("id", p['id']).execute()
-                st.rerun()
+            if isinstance(p, dict) and 'nazwa' in p:
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"👷 **{p['nazwa']}**")
+                # Bezpieczne wyciąganie ID i zabezpieczenie klucza przycisku
+                if c2.button("Usuń", key=f"p_{p.get('id', 'unknown')}"):
+                    supabase.table("pracownicy").delete().eq("id", p.get('id')).execute()
+                    st.rerun()
 
     # --- RESZTA FUNKCJI ---
     elif menu == "🔎 Wyszukiwarka":
         st.title("🔎 Wyszukiwarka")
         res = supabase.table("wydania_scin").select("*, pracownicy(nazwa)").order("data", desc=True).execute()
-        if res.data:
-            df = pd.DataFrame(res.data)
-            df['Pracownik'] = df['pracownicy'].apply(lambda x: x['nazwa'] if x else "Nieznany")
+        
+        data_to_df = res.data if isinstance(res.data, list) else ([res.data] if isinstance(res.data, dict) else [])
+        if data_to_df:
+            df = pd.DataFrame(data_to_df)
+            if 'pracownicy' in df.columns:
+                df['Pracownik'] = df['pracownicy'].apply(lambda x: x.get('nazwa', 'Nieznany') if isinstance(x, dict) else "Nieznany")
             st.dataframe(df[['data', 'Pracownik', 'dlugosc', 'obstawki', 'm3', 'adnotacja']], use_container_width=True)
 
     elif menu == "📈 Statystyki":
         st.title("📈 Statystyki")
         res = supabase.table("wydania_scin").select("*, pracownicy(nazwa)").execute()
-        if res.data:
-            df = pd.DataFrame(res.data)
-            df['Pracownik'] = df['pracownicy'].apply(lambda x: x['nazwa'] if x else "Nieznany")
-            st.bar_chart(df.groupby("Pracownik")['m3'].sum())
+        
+        data_to_df = res.data if isinstance(res.data, list) else ([res.data] if isinstance(res.data, dict) else [])
+        if data_to_df:
+            df = pd.DataFrame(data_to_df)
+            if 'pracownicy' in df.columns:
+                df['Pracownik'] = df['pracownicy'].apply(lambda x: x.get('nazwa', 'Nieznany') if isinstance(x, dict) else "Nieznany")
+                st.bar_chart(df.groupby("Pracownik")['m3'].sum())
 
     elif menu == "📊 Eksport Excel":
         st.title("📊 Eksport")
         res = supabase.table("wydania_scin").select("*, pracownicy(nazwa)").execute()
-        if res.data:
-            df = pd.DataFrame(res.data)
-            df['Pracownik'] = df['pracownicy'].apply(lambda x: x['nazwa'] if x else "Nieznany")
+        
+        data_to_df = res.data if isinstance(res.data, list) else ([res.data] if isinstance(res.data, dict) else [])
+        if data_to_df:
+            df = pd.DataFrame(data_to_df)
+            if 'pracownicy' in df.columns:
+                df['Pracownik'] = df['pracownicy'].apply(lambda x: x.get('nazwa', 'Nieznany') if isinstance(x, dict) else "Nieznany")
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df[['data', 'Pracownik', 'dlugosc', 'obstawki', 'm3', 'adnotacja']].to_excel(writer, index=False)
@@ -137,9 +175,13 @@ else:
     elif menu == "💬 Czat":
         st.title("💬 Czat")
         msgs = supabase.table("sugestie").select("*").order("id", desc=False).execute()
-        for m in msgs.data:
-            with st.chat_message("user" if m['uzytkownik'] == st.session_state.uzytkownik else "assistant"):
-                st.write(f"**{m['uzytkownik']}**: {m['tresc']}")
+        
+        data_msgs = msgs.data if isinstance(msgs.data, list) else ([msgs.data] if isinstance(msgs.data, dict) else [])
+        for m in data_msgs:
+            if isinstance(m, dict):
+                with st.chat_message("user" if m.get('uzytkownik') == st.session_state.uzytkownik else "assistant"):
+                    st.write(f"**{m.get('uzytkownik', 'Ktoś')}**: {m.get('tresc', '')}")
+                    
         if p := st.chat_input("Napisz..."):
             supabase.table("sugestie").insert({"uzytkownik": st.session_state.uzytkownik, "tresc": p}).execute()
             st.rerun()
